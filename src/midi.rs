@@ -1,6 +1,6 @@
 use anyhow::Result;
 use log::{error, info};
-use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort};
+use midir::{Ignore, MidiInput, MidiInputConnection, MidiInputPort, PortInfoError};
 
 pub trait MidiMessageHandler {
     fn handle(&mut self, stamp: u64, data: &[u8]) -> Result<()>;
@@ -13,10 +13,27 @@ pub fn get_midi_conn(
     let mut midi_in = MidiInput::new("midir reading input")?;
     midi_in.ignore(Ignore::None);
 
-    let port = get_midi_port(&midi_in, device_name).ok_or(anyhow::format_err!(
-        "No MIDI port found for device: {}",
-        device_name
-    ))?;
+    let port = match get_midi_port(&midi_in, device_name) {
+        Some(p) => p,
+        None => {
+            let devices = midi_in
+                .ports()
+                .iter()
+                .map(|p| midi_in.port_name(p))
+                .collect::<Result<Vec<String>, PortInfoError>>();
+
+            let available_devices = match devices {
+                Ok(d) => d.join("\n  "),
+                Err(_) => "Unable to list available devices.".to_string(),
+            };
+
+            anyhow::bail!(
+                "No MIDI port found for device: {}. Available devices:\n  {}",
+                device_name,
+                available_devices
+            );
+        }
+    };
 
     let in_port_name = midi_in.port_name(&port)?;
     info!("Opening connection to {}", in_port_name);
