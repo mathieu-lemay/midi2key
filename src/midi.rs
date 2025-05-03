@@ -1,7 +1,7 @@
 use anyhow::Result;
 use log::{error, info};
 use midir::{
-    Ignore, MidiIO, MidiInput, MidiInputConnection, MidiInputPort, MidiOutput,
+    Ignore, MidiIO, MidiInput, MidiInputConnection, MidiOutput,
     MidiOutputConnection, PortInfoError,
 };
 

@@ -8,7 +8,7 @@ use anyhow::Result;
 use evdev::uinput::VirtualDevice;
 use evdev::{InputEvent, KeyCode, KeyEvent};
 use log::{debug, info, warn};
-use midir::{MidiOutput, MidiOutputConnection};
+use midir::MidiOutputConnection;
 use midly::MidiMessage;
 use midly::live::LiveEvent;
 use serde::Deserialize;
