@@ -8,11 +8,12 @@ use anyhow::Result;
 use evdev::uinput::VirtualDevice;
 use evdev::{InputEvent, KeyCode, KeyEvent};
 use log::{debug, info, warn};
+use midir::{MidiOutput, MidiOutputConnection};
 use midly::MidiMessage;
 use midly::live::LiveEvent;
 use serde::Deserialize;
 
-use crate::midi::MidiMessageHandler;
+use crate::midi::{MidiMessageHandler, get_midi_output_conn};
 
 mod midi;
 mod virtual_keyboard;
@@ -72,6 +73,7 @@ impl TryFrom<&MidiKeyMapping> for Action {
 
 struct Handler {
     kb: VirtualDevice,
+    midi_out: Option<MidiOutputConnection>,
     mappings: HashMap<Event, Action>,
 }
 
@@ -126,7 +128,8 @@ impl MidiMessageHandler for Handler {
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    midi_device: String,
+    midi_input: String,
+    midi_output: Option<String>,
     mappings: Vec<MidiKeyMapping>,
 }
 
@@ -176,11 +179,19 @@ fn main() -> Result<()> {
     let config = get_config()?;
 
     let kb = virtual_keyboard::create_virtual_keyboard()?;
+    let midi_out = match &config.midi_output {
+        Some(out) => Some(get_midi_output_conn(out)?),
+        None => None,
+    };
 
     let mappings = get_mappings(&config)?;
 
-    let handler = Handler { kb, mappings };
-    let _conn = midi::get_midi_conn(&config.midi_device, handler)?;
+    let handler = Handler {
+        kb,
+        midi_out,
+        mappings,
+    };
+    let _conn = midi::get_midi_input_conn(&config.midi_input, handler)?;
 
     let (tx, rx) = channel();
     ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))
