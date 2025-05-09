@@ -5,16 +5,15 @@ use std::str::FromStr;
 use std::sync::mpsc::channel;
 
 use anyhow::Result;
-use evdev::uinput::VirtualDevice;
-use evdev::{InputEvent, KeyCode, KeyEvent};
-use log::{debug, info, warn};
-use midly::MidiMessage;
-use midly::live::LiveEvent;
+use evdev::KeyCode;
+use log::info;
 use serde::Deserialize;
 
-use crate::katana::{KatanaControl, Preset};
-use crate::midi::{MidiMessageHandler, get_midi_output_conn};
+use crate::handler::Handler;
+use crate::katana::KatanaControl;
+use crate::midi::get_midi_output_conn;
 
+mod handler;
 mod katana;
 mod midi;
 mod virtual_keyboard;
@@ -115,89 +114,6 @@ impl TryFrom<&MidiKeyMapping> for Action {
             keys,
             kat,
         })
-    }
-}
-
-struct Handler {
-    kb: VirtualDevice,
-    kat: Option<KatanaControl>,
-    mappings: HashMap<Event, Action>,
-}
-
-impl MidiMessageHandler for Handler {
-    fn handle(&mut self, _: u64, raw_message: &[u8]) -> Result<()> {
-        let (_ch, msg) = match LiveEvent::parse(raw_message) {
-            Ok(LiveEvent::Midi { channel, message }) => (channel, message),
-            Ok(evt) => {
-                warn!("Ignoring non Midi event: {:?}", evt);
-                return Ok(());
-            }
-            Err(e) => {
-                return Err(anyhow::anyhow!(e));
-            }
-        };
-
-        let evt = match msg {
-            MidiMessage::ProgramChange { program: p } => Some(Event::PC(p.as_int())),
-            MidiMessage::Controller {
-                controller: c,
-                value: _,
-            } => Some(Event::CC(c.as_int())),
-            _ => None,
-        };
-
-        if evt.is_none() {
-            warn!("Unsupported message: {:?}", msg);
-            return Ok(());
-        }
-        let evt = evt.unwrap();
-
-        let act = self.mappings.get(&evt);
-        if act.is_none() {
-            warn!("Unsupported message: {:?}", msg);
-            return Ok(());
-        }
-
-        let act = act.unwrap();
-        debug!("{}", act.desc);
-
-        let mut keys: Vec<InputEvent> = act.keys.iter().map(|k| *KeyEvent::new(*k, 1)).collect();
-
-        act.keys.iter().rev().for_each(|k| {
-            let e = *KeyEvent::new(*k, 0);
-            keys.push(e);
-        });
-
-        self.kb.emit(&keys)?;
-
-        if let Some(kat) = &mut self.kat {
-            for act in &act.kat {
-                apply_katana_action(kat, act)?;
-            }
-        } else {
-            if !act.kat.is_empty() {
-                warn!(
-                    "Katana actions defined but no midi output selected: {}",
-                    act.desc
-                );
-            }
-        }
-
-        Ok(())
-    }
-}
-
-fn apply_katana_action(kat: &mut KatanaControl, act: &KatanaAction) -> Result<()> {
-    match act {
-        KatanaAction::PresetPanel => kat.change_preset(Preset::Panel),
-        KatanaAction::PresetA1 => kat.change_preset(Preset::A1),
-        KatanaAction::PresetA2 => kat.change_preset(Preset::A2),
-        KatanaAction::PresetA3 => kat.change_preset(Preset::A3),
-        KatanaAction::PresetA4 => kat.change_preset(Preset::A4),
-        KatanaAction::PresetB1 => kat.change_preset(Preset::B1),
-        KatanaAction::PresetB2 => kat.change_preset(Preset::B2),
-        KatanaAction::PresetB3 => kat.change_preset(Preset::B3),
-        KatanaAction::PresetB4 => kat.change_preset(Preset::B4),
     }
 }
 
