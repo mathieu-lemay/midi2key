@@ -1,8 +1,13 @@
 use anyhow::Result;
 use log::{error, info};
 use midir::{
-    Ignore, MidiIO, MidiInput, MidiInputConnection, MidiOutput,
-    MidiOutputConnection, PortInfoError,
+    Ignore,
+    MidiIO,
+    MidiInput,
+    MidiInputConnection,
+    MidiOutput,
+    MidiOutputConnection,
+    PortInfoError,
 };
 
 pub trait MidiMessageHandler {

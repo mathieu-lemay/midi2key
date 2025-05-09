@@ -8,13 +8,14 @@ use anyhow::Result;
 use evdev::uinput::VirtualDevice;
 use evdev::{InputEvent, KeyCode, KeyEvent};
 use log::{debug, info, warn};
-use midir::MidiOutputConnection;
 use midly::MidiMessage;
 use midly::live::LiveEvent;
 use serde::Deserialize;
 
+use crate::katana::{KatanaControl, Preset};
 use crate::midi::{MidiMessageHandler, get_midi_output_conn};
 
+mod katana;
 mod midi;
 mod virtual_keyboard;
 
@@ -46,34 +47,80 @@ impl TryFrom<&str> for Event {
     }
 }
 
+#[derive(Debug)]
+pub enum KatanaAction {
+    PresetPanel,
+    PresetA1,
+    PresetA2,
+    PresetA3,
+    PresetA4,
+    PresetB1,
+    PresetB2,
+    PresetB3,
+    PresetB4,
+}
+
+impl TryFrom<&str> for KatanaAction {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "PRESET_PANEL" => Ok(KatanaAction::PresetPanel),
+            "PRESET_A1" => Ok(KatanaAction::PresetA1),
+            "PRESET_A2" => Ok(KatanaAction::PresetA2),
+            "PRESET_A3" => Ok(KatanaAction::PresetA3),
+            "PRESET_A4" => Ok(KatanaAction::PresetA4),
+            "PRESET_B1" => Ok(KatanaAction::PresetB1),
+            "PRESET_B2" => Ok(KatanaAction::PresetB2),
+            "PRESET_B3" => Ok(KatanaAction::PresetB3),
+            "PRESET_B4" => Ok(KatanaAction::PresetB4),
+            _ => anyhow::bail!("Invalid action: {}", value),
+        }
+    }
+}
+
 struct Action {
     desc: String,
     keys: Vec<KeyCode>,
+    kat: Vec<KatanaAction>,
 }
 
 impl TryFrom<&MidiKeyMapping> for Action {
     type Error = anyhow::Error;
 
     fn try_from(value: &MidiKeyMapping) -> Result<Self, Self::Error> {
-        let keys = value
-            .keys
-            .iter()
-            .map(|k| match KeyCode::from_str(k) {
-                Ok(kc) => Ok(kc),
-                Err(_) => anyhow::bail!("Invalid KeyCode: {}", k),
-            })
-            .collect::<Result<Vec<KeyCode>>>()?;
+        let keys = match &value.keys {
+            Some(keys) => keys
+                .iter()
+                .map(|k| match KeyCode::from_str(k) {
+                    Ok(kc) => Ok(kc),
+                    Err(_) => anyhow::bail!("Invalid KeyCode: {}", k),
+                })
+                .collect::<Result<Vec<KeyCode>>>()?,
+            None => vec![],
+        };
 
+        let kat = match &value.kat {
+            Some(kat) => kat
+                .iter()
+                .map(|k| match KatanaAction::try_from(k.as_str()) {
+                    Ok(kc) => Ok(kc),
+                    Err(_) => anyhow::bail!("Invalid Katana Action: {:?}", k),
+                })
+                .collect::<Result<Vec<KatanaAction>>>()?,
+            None => vec![],
+        };
         Ok(Self {
             desc: String::from(&value.description),
             keys,
+            kat,
         })
     }
 }
 
 struct Handler {
     kb: VirtualDevice,
-    midi_out: Option<MidiOutputConnection>,
+    kat: Option<KatanaControl>,
     mappings: HashMap<Event, Action>,
 }
 
@@ -110,7 +157,9 @@ impl MidiMessageHandler for Handler {
             warn!("Unsupported message: {:?}", msg);
             return Ok(());
         }
+
         let act = act.unwrap();
+        debug!("{}", act.desc);
 
         let mut keys: Vec<InputEvent> = act.keys.iter().map(|k| *KeyEvent::new(*k, 1)).collect();
 
@@ -119,10 +168,36 @@ impl MidiMessageHandler for Handler {
             keys.push(e);
         });
 
-        debug!("{}", act.desc);
         self.kb.emit(&keys)?;
 
+        if let Some(kat) = &mut self.kat {
+            for act in &act.kat {
+                apply_katana_action(kat, act)?;
+            }
+        } else {
+            if !act.kat.is_empty() {
+                warn!(
+                    "Katana actions defined but no midi output selected: {}",
+                    act.desc
+                );
+            }
+        }
+
         Ok(())
+    }
+}
+
+fn apply_katana_action(kat: &mut KatanaControl, act: &KatanaAction) -> Result<()> {
+    match act {
+        KatanaAction::PresetPanel => kat.change_preset(Preset::Panel),
+        KatanaAction::PresetA1 => kat.change_preset(Preset::A1),
+        KatanaAction::PresetA2 => kat.change_preset(Preset::A2),
+        KatanaAction::PresetA3 => kat.change_preset(Preset::A3),
+        KatanaAction::PresetA4 => kat.change_preset(Preset::A4),
+        KatanaAction::PresetB1 => kat.change_preset(Preset::B1),
+        KatanaAction::PresetB2 => kat.change_preset(Preset::B2),
+        KatanaAction::PresetB3 => kat.change_preset(Preset::B3),
+        KatanaAction::PresetB4 => kat.change_preset(Preset::B4),
     }
 }
 
@@ -137,13 +212,14 @@ struct Config {
 struct MidiKeyMapping {
     event: String,
     description: String,
-    keys: Vec<String>,
+    keys: Option<Vec<String>>,
+    kat: Option<Vec<String>>,
 }
 
 fn get_config() -> Result<Config> {
     let mut cfg_file = dirs::config_dir().unwrap_or(PathBuf::from("."));
     cfg_file.push(APP_NAME);
-    cfg_file.push("config.toml");
+    cfg_file.push("config.v2.toml");
 
     let s = match read_to_string(&cfg_file) {
         Ok(s) => s,
@@ -184,13 +260,14 @@ fn main() -> Result<()> {
         None => None,
     };
 
+    let kat = match midi_out {
+        Some(conn) => Some(KatanaControl::new(conn)?),
+        None => None,
+    };
+
     let mappings = get_mappings(&config)?;
 
-    let handler = Handler {
-        kb,
-        midi_out,
-        mappings,
-    };
+    let handler = Handler { kb, kat, mappings };
     let _conn = midi::get_midi_input_conn(&config.midi_input, handler)?;
 
     let (tx, rx) = channel();
