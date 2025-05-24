@@ -4,16 +4,18 @@ use anyhow::Result;
 use evdev::uinput::VirtualDevice;
 use evdev::{InputEvent, KeyCode, KeyEvent};
 use log::{debug, warn};
+use midi_msg::{Channel, ChannelVoiceMsg, ControlChange, MidiMsg};
+use midir::MidiOutputConnection;
 use midly::MidiMessage;
 use midly::live::LiveEvent;
 
-use crate::katana::{KatanaControl, Preset};
+use crate::action::midi::MidiAction;
 use crate::midi::MidiMessageHandler;
-use crate::{Action, Event, KatanaAction};
+use crate::{Action, Event};
 
 pub struct Handler {
     pub kb: VirtualDevice,
-    pub kat: Option<KatanaControl>,
+    pub midi_out: Option<MidiOutputConnection>,
     pub mappings: HashMap<Event, Action>,
 }
 
@@ -55,7 +57,7 @@ impl MidiMessageHandler for Handler {
         debug!("{}", act.desc);
 
         emit_keyboard_events(&mut self.kb, &act.keys)?;
-        emit_katana_events(&mut self.kat, &act.kat)?;
+        emit_midi_events(&mut self.midi_out, &act.midi)?;
 
         Ok(())
     }
@@ -74,9 +76,12 @@ fn emit_keyboard_events(kb: &mut VirtualDevice, keys: &[KeyCode]) -> Result<()> 
     Ok(())
 }
 
-fn emit_katana_events(kat: &mut Option<KatanaControl>, acts: &[KatanaAction]) -> Result<()> {
-    let kat = match kat.as_mut() {
-        Some(kat) => kat,
+fn emit_midi_events(
+    midi_out: &mut Option<MidiOutputConnection>,
+    acts: &[MidiAction],
+) -> Result<()> {
+    let midi_out = match midi_out.as_mut() {
+        Some(m) => m,
         None => {
             if !acts.is_empty() {
                 warn!("Katana actions defined but no midi output selected");
@@ -87,22 +92,25 @@ fn emit_katana_events(kat: &mut Option<KatanaControl>, acts: &[KatanaAction]) ->
     };
 
     for act in acts {
-        apply_katana_action(kat, act)?;
+        let midi_msg = match *act {
+            MidiAction::PC(p) => MidiMsg::ChannelVoice {
+                channel: Channel::Ch1,
+                msg: ChannelVoiceMsg::ProgramChange { program: p },
+            },
+            MidiAction::CC(c, v) => {
+                let cc = ControlChange::CC {
+                    control: c,
+                    value: v,
+                };
+                MidiMsg::ChannelVoice {
+                    channel: Channel::Ch1,
+                    msg: ChannelVoiceMsg::ControlChange { control: cc },
+                }
+            }
+        };
+
+        midi_out.send(&midi_msg.to_midi())?;
     }
 
     Ok(())
-}
-
-fn apply_katana_action(kat: &mut KatanaControl, act: &KatanaAction) -> Result<()> {
-    match act {
-        KatanaAction::PresetPanel => kat.change_preset(Preset::Panel),
-        KatanaAction::PresetA1 => kat.change_preset(Preset::A1),
-        KatanaAction::PresetA2 => kat.change_preset(Preset::A2),
-        KatanaAction::PresetA3 => kat.change_preset(Preset::A3),
-        KatanaAction::PresetA4 => kat.change_preset(Preset::A4),
-        KatanaAction::PresetB1 => kat.change_preset(Preset::B1),
-        KatanaAction::PresetB2 => kat.change_preset(Preset::B2),
-        KatanaAction::PresetB3 => kat.change_preset(Preset::B3),
-        KatanaAction::PresetB4 => kat.change_preset(Preset::B4),
-    }
 }
