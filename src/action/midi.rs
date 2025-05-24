@@ -1,10 +1,16 @@
 use anyhow::Result;
 use itertools::Itertools;
+use midi_msg::{Channel, ChannelVoiceMsg, ControlChange, MidiMsg};
 
 #[derive(Debug)]
-pub enum MidiAction {
-    PC(u8),
-    CC(u8, u8),
+pub struct MidiAction {
+    msg: MidiMsg,
+}
+
+impl MidiAction {
+    pub fn to_midi(&self) -> Vec<u8> {
+        self.msg.to_midi()
+    }
 }
 
 impl TryFrom<&str> for MidiAction {
@@ -18,17 +24,20 @@ impl TryFrom<&str> for MidiAction {
             }
         };
 
-        let act = match type_ {
+        let msg = match type_ {
             "CC" => parse_cc_action(val),
             "PC" => parse_pc_action(val),
             _ => anyhow::bail!("Invalid action: {}", value),
         };
 
-        act.map_err(|e| anyhow::anyhow!(format!("Unable to parse {}: {}", value, e)))
+        match msg {
+            Ok(m) => Ok(MidiAction { msg: m }),
+            Err(e) => Err(anyhow::anyhow!(format!("Unable to parse {}: {}", value, e))),
+        }
     }
 }
 
-fn parse_cc_action(value: &str) -> Result<MidiAction> {
+fn parse_cc_action(value: &str) -> Result<MidiMsg> {
     let parts: Vec<u8> = value
         .splitn(2, ":")
         .map(|v| match v.parse::<u8>() {
@@ -41,11 +50,22 @@ fn parse_cc_action(value: &str) -> Result<MidiAction> {
         anyhow::bail!("value should contain exactly 2 parts")
     }
 
-    Ok(MidiAction::CC(parts[0], parts[1]))
+    let cc = ControlChange::CC {
+        control: parts[0],
+        value: parts[1],
+    };
+
+    Ok(MidiMsg::ChannelVoice {
+        channel: Channel::Ch1,
+        msg: ChannelVoiceMsg::ControlChange { control: cc },
+    })
 }
 
-fn parse_pc_action(value: &str) -> Result<MidiAction> {
-    let v = value.parse::<u8>()?;
+fn parse_pc_action(value: &str) -> Result<MidiMsg> {
+    let p = value.parse::<u8>()?;
 
-    Ok(MidiAction::PC(v))
+    Ok(MidiMsg::ChannelVoice {
+        channel: Channel::Ch1,
+        msg: ChannelVoiceMsg::ProgramChange { program: p },
+    })
 }

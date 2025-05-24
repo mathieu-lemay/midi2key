@@ -4,7 +4,6 @@ use anyhow::Result;
 use evdev::uinput::VirtualDevice;
 use evdev::{InputEvent, KeyCode, KeyEvent};
 use log::{debug, warn};
-use midi_msg::{Channel, ChannelVoiceMsg, ControlChange, MidiMsg};
 use midir::MidiOutputConnection;
 use midly::MidiMessage;
 use midly::live::LiveEvent;
@@ -92,24 +91,7 @@ fn emit_midi_events(
     };
 
     for act in acts {
-        let midi_msg = match *act {
-            MidiAction::PC(p) => MidiMsg::ChannelVoice {
-                channel: Channel::Ch1,
-                msg: ChannelVoiceMsg::ProgramChange { program: p },
-            },
-            MidiAction::CC(c, v) => {
-                let cc = ControlChange::CC {
-                    control: c,
-                    value: v,
-                };
-                MidiMsg::ChannelVoice {
-                    channel: Channel::Ch1,
-                    msg: ChannelVoiceMsg::ControlChange { control: cc },
-                }
-            }
-        };
-
-        midi_out.send(&midi_msg.to_midi())?;
+        midi_out.send(&act.to_midi())?;
     }
 
     Ok(())
