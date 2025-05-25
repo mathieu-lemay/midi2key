@@ -67,7 +67,7 @@ where
 
     for p in in_ports {
         if let Ok(name) = midi_io.port_name(&p) {
-            if name.starts_with(device_name) {
+            if name.contains(device_name) {
                 return Ok(p);
             }
         }

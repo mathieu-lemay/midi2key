@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use evdev::uinput::VirtualDevice;
 use evdev::{InputEvent, KeyCode, KeyEvent};
-use log::{debug, warn};
+use log::{debug, info, warn};
 use midir::MidiOutputConnection;
 use midly::MidiMessage;
 use midly::live::LiveEvent;
@@ -53,7 +53,7 @@ impl MidiMessageHandler for Handler {
         }
 
         let act = act.unwrap();
-        debug!("{}", act.desc);
+        info!("{}", act.desc);
 
         emit_keyboard_events(&mut self.kb, &act.keys)?;
         emit_midi_events(&mut self.midi_out, &act.midi)?;
@@ -83,7 +83,7 @@ fn emit_midi_events(
         Some(m) => m,
         None => {
             if !acts.is_empty() {
-                warn!("Katana actions defined but no midi output selected");
+                warn!("Midi actions defined but no midi output selected");
             }
 
             return Ok(());
@@ -91,6 +91,7 @@ fn emit_midi_events(
     };
 
     for act in acts {
+        debug!("Sending midi action: {:?}", act);
         midi_out.send(&act.to_midi())?;
     }
 
