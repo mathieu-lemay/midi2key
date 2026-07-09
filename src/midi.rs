@@ -59,10 +59,10 @@ fn get_midi_port(midi_in: &MidiInput, device_name: &str) -> Option<MidiInputPort
     let in_ports = midi_in.ports();
 
     for p in in_ports {
-        if let Ok(name) = midi_in.port_name(&p) {
-            if name.starts_with(device_name) {
-                return Some(p);
-            }
+        if let Ok(name) = midi_in.port_name(&p)
+            && name.starts_with(device_name)
+        {
+            return Some(p);
         }
     }
 
