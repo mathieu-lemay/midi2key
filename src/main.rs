@@ -1,19 +1,21 @@
 use std::collections::HashMap;
 use std::fs::read_to_string;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::mpsc::channel;
+use std::thread;
+use std::time::Duration;
 
 use anyhow::Result;
+use evdev::KeyEvent;
 use evdev::uinput::VirtualDevice;
-use evdev::{InputEvent, KeyCode, KeyEvent};
 use log::{debug, info, warn};
 use midly::MidiMessage;
 use midly::live::LiveEvent;
-use serde::Deserialize;
 
+use crate::config::{Config, KeyPress, MidiKeyMapping};
 use crate::midi::MidiMessageHandler;
 
+mod config;
 mod midi;
 mod virtual_keyboard;
 
@@ -47,25 +49,16 @@ impl TryFrom<&str> for Event {
 
 struct Action {
     desc: String,
-    keys: Vec<KeyCode>,
+    keys: Vec<KeyPress>,
 }
 
 impl TryFrom<&MidiKeyMapping> for Action {
     type Error = anyhow::Error;
 
     fn try_from(value: &MidiKeyMapping) -> Result<Self, Self::Error> {
-        let keys = value
-            .keys
-            .iter()
-            .map(|k| match KeyCode::from_str(k) {
-                Ok(kc) => Ok(kc),
-                Err(_) => anyhow::bail!("Invalid KeyCode: {}", k),
-            })
-            .collect::<Result<Vec<KeyCode>>>()?;
-
         Ok(Self {
             desc: String::from(&value.description),
-            keys,
+            keys: value.keys.to_vec(),
         })
     }
 }
@@ -110,31 +103,25 @@ impl MidiMessageHandler for Handler {
         }
         let act = act.unwrap();
 
-        let mut keys: Vec<InputEvent> = act.keys.iter().map(|k| *KeyEvent::new(*k, 1)).collect();
-
-        act.keys.iter().rev().for_each(|k| {
-            let e = *KeyEvent::new(*k, 0);
-            keys.push(e);
-        });
-
         debug!("{}", act.desc);
-        self.kb.emit(&keys)?;
+
+        for kp in act.keys.iter() {
+            if let Some(wait) = kp.wait {
+                thread::sleep(Duration::from_millis(wait));
+            }
+
+            let mut keys = vec![*KeyEvent::new(kp.key, 1), *KeyEvent::new(kp.key, 0)];
+
+            if let Some(mod_key) = kp.modifier {
+                keys.insert(0, *KeyEvent::new(mod_key, 1));
+                keys.push(*KeyEvent::new(mod_key, 0));
+            }
+
+            self.kb.emit(&keys)?;
+        }
 
         Ok(())
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct Config {
-    midi_device: String,
-    mappings: Vec<MidiKeyMapping>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MidiKeyMapping {
-    event: String,
-    description: String,
-    keys: Vec<String>,
 }
 
 fn get_config() -> Result<Config> {
